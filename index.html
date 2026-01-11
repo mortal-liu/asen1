@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title>DigiGhetto | 交互动态版</title>
+    <style>
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: #dc2626; }
+        .lyric-mask {
+            mask-image: linear-gradient(to bottom, transparent, black 20%, black 80%, transparent);
+            -webkit-mask-image: linear-gradient(to bottom, transparent, black 20%, black 80%, transparent);
+        }
+        .bg-transition { transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1); }
+        .lyric-line { transition: all 0.5s ease; }
+
+        /* 自定义进度条 */
+        input[type=range] { appearance: none; background: transparent; cursor: pointer; }
+        input[type=range]::-webkit-slider-runnable-track { background: #27272a; height: 6px; border-radius: 99px; }
+        input[type=range]::-webkit-slider-thumb { 
+            appearance: none; height: 16px; width: 16px; background: #dc2626; 
+            border-radius: 50%; margin-top: -5px; box-shadow: 0 0 15px rgba(220,38,38,0.6);
+        }
+
+        /* --- 新增：封面呼吸灯效果 --- */
+        .cover-breathing {
+            box-shadow: 0 0 30px -5px rgba(220, 38, 38, 0.3);
+            animation: breathing 4s ease-in-out infinite;
+        }
+        @keyframes breathing {
+            0%, 100% { box-shadow: 0 0 30px -10px rgba(220, 38, 38, 0.2); transform: scale(1); }
+            50% { box-shadow: 0 0 60px 0px rgba(220, 38, 38, 0.5); transform: scale(1.01); }
+        }
+
+        /* --- 新增：背景文字漂浮效果 --- */
+        .floating-text {
+            animation: float 15s linear infinite;
+        }
+        @keyframes float {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            25% { transform: translate(15px, 15px) rotate(1deg); }
+            50% { transform: translate(0px, 30px) rotate(0deg); }
+            75% { transform: translate(-15px, 15px) rotate(-1deg); }
+        }
+    </style>
+</head>
+<body class="bg-black text-white font-sans overflow-x-hidden selection:bg-red-600">
+
+    <nav class="flex justify-between items-center px-10 py-6 border-b border-zinc-900 bg-black/90 backdrop-blur-md sticky top-0 z-50">
+        <div class="text-3xl font-black italic tracking-tighter text-red-600 uppercase">DIGIGHETTO</div>
+        <div class="text-[10px] font-mono text-zinc-600 uppercase">Dynamic UX v3.6</div>
+    </nav>
+
+    <section id="artist-grid" class="grid grid-cols-2 md:grid-cols-5 bg-zinc-950 border-b border-zinc-900"></section>
+
+    <main class="relative min-h-[750px] flex items-center justify-center p-6 lg:p-20">
+        <div id="bg-name" class="absolute inset-0 flex justify-center items-center -z-10 opacity-5 select-none floating-text">
+            <h1 class="text-[25vw] font-black italic uppercase text-zinc-800">DIGI</h1>
+        </div>
+
+        <div class="w-full max-w-6xl flex flex-col lg:flex-row gap-16">
+            <div class="w-full lg:w-2/5">
+                <div id="album-cover" class="aspect-square bg-zinc-800 overflow-hidden border border-zinc-800 shadow-2xl cover-breathing">
+                    <img src="" id="main-img" class="w-full h-full object-cover transition duration-1000">
+                </div>
+            </div>
+
+            <div class="w-full lg:w-3/5 bg-zinc-900/40 p-10 border border-zinc-800/50 backdrop-blur-xl">
+                <div class="flex items-center gap-8 mb-10">
+                    <div id="play-btn" class="w-20 h-20 bg-red-600 rounded-full flex items-center justify-center cursor-pointer active:scale-95 transition group relative">
+                        <div class="absolute inset-0 bg-red-600 rounded-full animate-ping opacity-20 group-hover:opacity-40"></div>
+                        <span id="play-text" class="relative font-black italic text-sm">PLAY</span>
+                    </div>
+                    <div>
+                        <h2 id="song-title" class="text-4xl font-bold mb-2 tracking-tight">--</h2>
+                        <p id="artist-label" class="text-red-500 text-sm font-mono tracking-[0.4em] font-bold uppercase">--</p>
+                    </div>
+                </div>
+
+                <div class="mb-10 flex items-center gap-4">
+                    <span id="time-current" class="text-xs font-mono text-zinc-500">00:00</span>
+                    <input type="range" id="progress-range" min="0" max="100" value="0" class="flex-1">
+                    <span id="time-total" class="text-xs font-mono text-zinc-500">00:00</span>
+                </div>
+
+                <div id="lyrics-container" class="h-80 overflow-y-auto lyric-mask space-y-8 scroll-smooth pr-4 text-center">
+                    <p class="text-zinc-600 italic">等待系统响应...</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <audio id="audio-engine"></audio>
+
+    <script>
+        const artists = [
+            {
+                id: 'asen',
+                name: 'Asen',
+                song: '看不到你',
+                audio: encodeURI('./musics/艾志恒Asen_-_看不到你.mp3'),
+                img: './images/LAST.jpg',
+                lrc: '我看不到'
+            }
+        ];
+
+        const audio = document.getElementById('audio-engine');
+        const lyricBox = document.getElementById('lyrics-container');
+        const progressRange = document.getElementById('progress-range');
+        let currentLyrics = [];
+        let lastIndex = -1;
+        
+        let isDragging = false; 
+        let isUserScrolling = false; 
+        let userScrollTimer = null;
+
+        function formatTime(secs) {
+            const m = Math.floor(secs / 60).toString().padStart(2, '0');
+            const s = Math.floor(secs % 60).toString().padStart(2, '0');
+            return `${m}:${s}`;
+        }
+
+        function parseLRC(lrcText) {
+            const lines = lrcText.split('\n');
+            const result = [];
+            const timeReg = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/;
+            lines.forEach(line => {
+                const match = timeReg.exec(line);
+                if (match) {
+                    const m = parseInt(match[1]), s = parseInt(match[2]), msStr = match[3];
+                    const ms = parseInt(msStr) / Math.pow(10, msStr.length);
+                    const time = m * 60 + s + ms;
+                    const text = line.replace(timeReg, '').trim();
+                    if (text) result.push({ t: time, txt: text });
+                }
+            });
+            return result.sort((a, b) => a.t - b.t);
+        }
+
+        async function switchArtist(data) {
+            // 背景大字也跟随歌手名动态变化
+            document.getElementById('bg-name').innerHTML = `<h1 class="text-[25vw] font-black italic uppercase text-zinc-800">${data.name}</h1>`;
+            document.getElementById('song-title').innerText = data.song;
+            document.getElementById('artist-label').innerText = data.name;
+            document.getElementById('main-img').src = data.img;
+            
+            audio.src = data.audio;
+            audio.load();
+            lastIndex = -1;
+            document.getElementById('play-text').innerText = 'PLAY';
+
+            try {
+                const response = await fetch(`./lyrics/${data.lrc}.lrc`);
+                const lrcString = await response.text();
+                currentLyrics = parseLRC(lrcString);
+                
+                lyricBox.innerHTML = currentLyrics.map((l, i) => `
+                    <p id="line-${i}" class="lyric-line text-zinc-600 text-lg py-1 transition-all cursor-pointer hover:text-red-400"
+                       onclick="audio.currentTime = ${l.t}; audio.play(); document.getElementById('play-text').innerText = 'PAUSE';">
+                        ${l.txt}
+                    </p>
+                `).join('');
+            } catch (err) {
+                lyricBox.innerHTML = `<p class="text-red-500 text-xs italic">歌词路径加载失败</p>`;
+            }
+        }
+
+        audio.ontimeupdate = () => {
+            if (!audio.duration) return;
+
+            if (!isDragging) {
+                const percent = (audio.currentTime / audio.duration) * 100;
+                progressRange.value = percent;
+                document.getElementById('time-current').innerText = formatTime(audio.currentTime);
+            }
+
+            let activeIndex = -1;
+            for (let i = 0; i < currentLyrics.length; i++) {
+                if (audio.currentTime >= currentLyrics[i].t) activeIndex = i;
+            }
+
+            if (activeIndex !== -1 && activeIndex !== lastIndex) {
+                const lines = lyricBox.querySelectorAll('p');
+                lines.forEach((l, i) => {
+                    if (i === activeIndex) {
+                        l.className = "lyric-line text-white text-3xl font-bold scale-105 py-2";
+                        if (!isUserScrolling) {
+                            l.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    } else {
+                        l.className = "lyric-line text-zinc-600 text-lg py-1 hover:text-red-400";
+                    }
+                });
+                lastIndex = activeIndex;
+            }
+        };
+
+        const handleManualScroll = () => {
+            isUserScrolling = true;
+            clearTimeout(userScrollTimer);
+            userScrollTimer = setTimeout(() => {
+                isUserScrolling = false;
+                const activeLine = lyricBox.querySelector('.text-white');
+                if (activeLine) activeLine.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 2000); 
+        };
+
+        lyricBox.addEventListener('wheel', handleManualScroll);
+        lyricBox.addEventListener('touchstart', handleManualScroll);
+        lyricBox.addEventListener('mousedown', handleManualScroll);
+
+        audio.onloadedmetadata = () => {
+            document.getElementById('time-total').innerText = formatTime(audio.duration);
+        };
+
+        progressRange.oninput = () => { isDragging = true; };
+        progressRange.onchange = () => {
+            audio.currentTime = (progressRange.value / 100) * audio.duration;
+            isDragging = false;
+        };
+
+        document.getElementById('play-btn').onclick = () => {
+            if (audio.paused) {
+                audio.play().then(() => {
+                    document.getElementById('play-text').innerText = 'PAUSE';
+                }).catch(err => alert("请确认音频文件位于 ./musics/ 文件夹内！"));
+            } else {
+                audio.pause();
+                document.getElementById('play-text').innerText = 'PLAY';
+            }
+        };
+
+        window.onload = () => {
+            const grid = document.getElementById('artist-grid');
+            artists.forEach(a => {
+                const btn = document.createElement('div');
+                btn.className = "p-8 border-r border-zinc-900 cursor-pointer hover:bg-zinc-900 transition font-black italic text-sm text-center uppercase";
+                btn.innerText = a.name;
+                btn.onclick = () => switchArtist(a);
+                grid.appendChild(btn);
+            });
+            switchArtist(artists[0]);
+        };
+    </script>
+</body>
+</html>
